@@ -41,6 +41,7 @@
         super();
         this.isAxis = false;
         this.time = 1.0;
+        this.time2 = 1.0;
       }
       getData() {
         return new Promise((resolve) => {
@@ -50,6 +51,92 @@
               resolve(res.features[0].geometry.coordinates[0][0]);
             });
         });
+      }
+      getSlideMat() {
+        const material = new THREE.ShaderMaterial({
+          // side: THREE.DoubleSide,
+          transparent: true,
+          depthTest: false,
+          uniforms: {
+            time: { value: 0.0 },
+            num: { value: 5.0 },
+            color1: { value: new THREE.Color('#00FFFF') }
+          },
+          vertexShader: ` 
+          varying vec2 vUv;
+          varying vec3 vNormal;
+          
+          void main() {
+            vUv=uv;
+            vNormal=normal;           
+              
+            gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+          }`,
+          fragmentShader: `uniform vec3 color1;  
+            uniform float time;  
+            uniform float num;                                 
+                      varying vec2 vUv; 
+                      varying vec3 vNormal;
+                void main() {
+                  if(vNormal.z==1.0||vNormal.z==-1.0||vUv.y ==0.0){
+                    discard;
+                  } else{                    
+                    gl_FragColor =  vec4(color1, 1.2-fract((-vUv.y+time ) * num) ) ;
+                  } 
+                }`
+        });
+        return material;
+      }
+
+      createBoundary(points) {
+        const shape = new THREE.Shape();
+
+        shape.moveTo(points[0].x, points[0].z);
+
+        for (let i = 1; i < points.length; i = i + 2) {
+          shape.lineTo(points[i].x, points[i].z);
+        }
+        shape.lineTo(points[0].x, points[0].z);
+        const material = new THREE.ShaderMaterial({
+          side: THREE.DoubleSide,
+          transparent: true,
+          depthTest: false,
+          uniforms: {
+            color1: { value: new THREE.Color('#00FFFF') }
+          },
+          vertexShader: ` 
+          varying vec2 vUv;
+          varying vec3 vNormal;
+          
+          void main() {
+            vUv=uv;
+            vNormal=normal;           
+              
+            gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+          }`,
+          fragmentShader: `uniform vec3 color1;                
+                      varying vec2 vUv; 
+                      varying vec3 vNormal;
+                void main() {
+                  if(vNormal.z==1.0||vNormal.z==-1.0||vUv.y ==0.0){
+                    discard;
+                  } else{
+                    gl_FragColor =vec4(color1,mix(1.0,0.0, vUv.y)) ;
+                  } 
+                }`
+        });
+
+        const extrudeSettings = {
+          depth: 0.3,
+          bevelEnabled: false
+        };
+
+        const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.rotation.x = Math.PI * 0.5;
+        mesh.position.y = extrudeSettings.depth;
+        return mesh;
       }
       createRegion(points) {
         const extrudeSettings = {
@@ -71,9 +158,16 @@
         tex.wrapT = THREE.RepeatWrapping;
         const material = new THREE.MeshBasicMaterial({
           map: tex,
-          color: new THREE.Color('#00FFFF')
+          color: new THREE.Color('#55FFFF')
         });
-        const mesh = new THREE.Mesh(geometry, material);
+        const slideMat = this.getSlideMat();
+        const mesh = new THREE.Mesh(geometry,
+          [
+            material,
+            slideMat
+          ]
+        );
+        this.material2 = slideMat;
         mesh.rotateX(Math.PI * 0.5);
 
         return mesh;
@@ -138,6 +232,8 @@ void main() {
         this.group.add(this.createLine(points));
         this.normalObj = this.createRegion(points);
         this.group.add(this.normalObj);
+        this.group.add(this.createBoundary(points));
+
         this.scene.add(this.group);
         this.setModelCenter(this.group, option.cameraControl);
         this.initBloom(option.bloom);
@@ -178,6 +274,14 @@ void main() {
           this.time = this.time + 0.005;
           this.material.uniforms.time.value = this.time;
         }
+        if (this.material2) {
+          if (this.time2 >= 1.0) {
+            this.time2 = 0.0;
+          }
+          this.time2 = this.time2 + 0.002;
+          this.material2.uniforms.time.value = this.time2;
+        }
+
       }
       animate() {
         if (this.isStats && this.stats) {
@@ -201,7 +305,7 @@ void main() {
           //不需要发光的物体在bloom后期前隐藏
           this.normalObj.visible = false;
 
-          this.composer.render();
+          // this.composer.render();
           this.renderer.clearDepth();
           //不需要发光的物体在bloom后期后显示
           this.normalObj.visible = true;
